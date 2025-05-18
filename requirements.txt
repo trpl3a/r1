@@ -80,6 +80,7 @@ uritools==5.0.0
 urllib3==2.4.0
 uvicorn==0.34.2
 weasyprint==65.1
+gunicorn==21.2.0
 webencodings==0.5.1
 Werkzeug==3.1.3
 xhtml2pdf==0.2.17
