@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XML E-Sign Analyzer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            padding-top: 2rem;
+            padding-bottom: 2rem;
+        }
+        .drop-zone {
+            border: 2px dashed #ccc;
+            border-radius: 5px;
+            padding: 3rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .drop-zone:hover {
+            border-color: #007bff;
+            background-color: #f8f9fa;
+        }
+        .drop-zone.active {
+            border-color: #28a745;
+            background-color: #f0fff4;
+        }
+        .progress {
+            display: none;
+            margin-top: 1rem;
+        }
+        #results-container {
+            display: none;
+            margin-top: 2rem;
+        }
+        .result-item {
+            border-left: 4px solid #dc3545;
+            padding-left: 1rem;
+            margin-bottom: 1rem;
+        }
+        .loading-spinner {
+            display: none;
+            margin: 2rem auto;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="row">
+            <div class="col-md-12">
+                <h1 class="mb-4">XML E-Sign Analyzer</h1>
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5>Upload XML Files</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="drop-zone" class="drop-zone">
+                            <p class="mb-2">Drag and drop XML files here</p>
+                            <p>or</p>
+                            <button id="browse-button" class="btn btn-primary">Browse Files</button>
+                            <input type="file" id="file-input" multiple accept=".xml" style="display: none;">
+                        </div>
+                        <div class="progress mt-3">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+                        </div>
+                        <div id="upload-status" class="mt-2"></div>
+                    </div>
+                </div>
+
+                <div id="loading-spinner" class="loading-spinner">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">Processing files, please wait...</p>
+                </div>
+
+                <div id="results-container" class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5>Results: <span id="result-count">0</span> buttons missing E-Sign</h5>
+                        <div>
+                            <a id="download-csv" href="/download/csv" class="btn btn-success me-2">Download CSV</a>
+                            <a id="download-text" href="/download/text" class="btn btn-info">Download Text</a>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="results-list"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const dropZone = document.getElementById('drop-zone');
+            const fileInput = document.getElementById('file-input');
+            const browseButton = document.getElementById('browse-button');
+            const progressBar = document.querySelector('.progress-bar');
+            const progress = document.querySelector('.progress');
+            const uploadStatus = document.getElementById('upload-status');
+            const resultsContainer = document.getElementById('results-container');
+            const resultsList = document.getElementById('results-list');
+            const resultCount = document.getElementById('result-count');
+            const loadingSpinner = document.getElementById('loading-spinner');
+
+            // Open file dialog when browse button is clicked
+            browseButton.addEventListener('click', function() {
+                fileInput.click();
+            });
+
+            // Handle file selection
+            fileInput.addEventListener('change', function() {
+                if (fileInput.files.length > 0) {
+                    uploadFiles(fileInput.files);
+                }
+            });
+
+            // Handle drag and drop events
+            dropZone.addEventListener('dragover', function(e) {
+                e.preventDefault();
+                dropZone.classList.add('active');
+            });
+
+            dropZone.addEventListener('dragleave', function() {
+                dropZone.classList.remove('active');
+            });
+
+            dropZone.addEventListener('drop', function(e) {
+                e.preventDefault();
+                dropZone.classList.remove('active');
+                
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    uploadFiles(files);
+                }
+            });
+
+            // Upload files function
+            function uploadFiles(files) {
+                // Check if files are XML
+                const xmlFiles = Array.from(files).filter(file => file.name.toLowerCase().endsWith('.xml'));
+                
+                if (xmlFiles.length === 0) {
+                    uploadStatus.innerHTML = '<div class="alert alert-danger">Please select XML files only.</div>';
+                    return;
+                }
+
+                // Create FormData object
+                const formData = new FormData();
+                xmlFiles.forEach(file => {
+                    formData.append('files[]', file);
+                });
+
+                // Show progress bar and loading spinner
+                progress.style.display = 'flex';
+                loadingSpinner.style.display = 'block';
+                uploadStatus.innerHTML = '';
+                resultsContainer.style.display = 'none';
+
+                // Upload files
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', '/upload', true);
+
+                xhr.upload.addEventListener('progress', function(e) {
+                    if (e.lengthComputable) {
+                        const percentComplete = (e.loaded / e.total) * 100;
+                        progressBar.style.width = percentComplete + '%';
+                    }
+                });
+
+                xhr.onload = function() {
+                    if (xhr.status === 200) {
+                        const response = JSON.parse(xhr.responseText);
+                        uploadStatus.innerHTML = `<div class="alert alert-success">${response.message}</div>`;
+                        
+                        // Fetch results
+                        fetchResults();
+                    } else {
+                        let errorMessage = 'Upload failed.';
+                        try {
+                            const response = JSON.parse(xhr.responseText);
+                            errorMessage = response.error || errorMessage;
+                        } catch (e) {}
+                        
+                        uploadStatus.innerHTML = `<div class="alert alert-danger">${errorMessage}</div>`;
+                        loadingSpinner.style.display = 'none';
+                    }
+                };
+
+                xhr.onerror = function() {
+                    uploadStatus.innerHTML = '<div class="alert alert-danger">Upload failed. Please try again.</div>';
+                    loadingSpinner.style.display = 'none';
+                };
+
+                xhr.send(formData);
+            }
+
+            // Fetch results function
+            function fetchResults() {
+                fetch('/results')
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('Failed to fetch results');
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        // Hide loading spinner
+                        loadingSpinner.style.display = 'none';
+                        
+                        // Update result count
+                        resultCount.textContent = data.length;
+                        
+                        // Clear previous results
+                        resultsList.innerHTML = '';
+                        
+                        // Group results by filename
+                        const groupedResults = {};
+                        data.forEach(item => {
+                            if (!groupedResults[item.filename]) {
+                                groupedResults[item.filename] = [];
+                            }
+                            groupedResults[item.filename].push(item);
+                        });
+                        
+                        // Display results
+                        for (const filename in groupedResults) {
+                            const fileGroup = document.createElement('div');
+                            fileGroup.className = 'mb-4';
+                            
+                            const fileHeader = document.createElement('h5');
+                            fileHeader.textContent = filename;
+                            fileGroup.appendChild(fileHeader);
+                            
+                            const items = groupedResults[filename];
+                            items.forEach(item => {
+                                const resultItem = document.createElement('div');
+                                resultItem.className = 'result-item p-2 mb-2 bg-light';
+                                
+                                resultItem.innerHTML = `
+                                    <div><strong>Button:</strong> ${item.button_name}</div>
+                                    <div><strong>Reason:</strong> ${item.reason}</div>
+                                `;
+                                
+                                fileGroup.appendChild(resultItem);
+                            });
+                            
+                            resultsList.appendChild(fileGroup);
+                        }
+                        
+                        // Show results container
+                        resultsContainer.style.display = 'block';
+                    })
+                    .catch(error => {
+                        uploadStatus.innerHTML = `<div class="alert alert-danger">${error.message}</div>`;
+                        loadingSpinner.style.display = 'none';
+                    });
+            }
+        });
+    </script>
+</body>
+</html>
